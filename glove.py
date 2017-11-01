@@ -12,6 +12,8 @@ class Glove:
 
     def __check_fit(self):
         assert len(self.id2tok) > 0 and len(self.tok2id) > 0, "Corpus is not fitted"
+
+    def __check_cooc(self):
         assert self.cooccurrence_matrix is not None, "Co-Occurrence Matrix is not formed"
 
     def __check_train(self):
@@ -76,6 +78,7 @@ class Glove:
 
     def train(self, embedding_size, learning_rate, epochs, alpha, x_max):
         self.__check_fit()
+        self.__check_cooc()
         self.vocab_size = 100
         W = np.random.normal(0.0, 1e-3, (self.vocab_size, embedding_size))
         W_tilda = np.random.normal(0.0, 1e-3, (self.vocab_size, embedding_size))
