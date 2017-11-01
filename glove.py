@@ -31,7 +31,7 @@ class Glove:
             num_toks = len(sentence_idx)
             for idx, id in enumerate(sentence_idx):
                 if self.verbose == 1:
-                    sys.stdout.write("\r" + 'Sentence:{}/{}, Token:{}/{}\n'.format(s+1,num_sentence,idx+1,num_toks))
+                    sys.stdout.write("\r" + 'Sentence:{}/{}, Token:{}/{}'.format(s+1,num_sentence,idx+1,num_toks))
                     sys.stdout.flush()
                 context_start = max(0, idx-window_size)
                 context_end = min(len(sentence_idx)-1, idx+window_size)
@@ -93,7 +93,7 @@ class Glove:
 
             for i in range(self.vocab_size):
                 for j in range(self.vocab_size):
-                    sys.stdout.write("\r" + 'i:{}/{}, j:{}/{}\n'.format(i + 1, self.vocab_size, j + 1, self.vocab_size))
+                    sys.stdout.write("\r" + 'i:{}/{}, j:{}/{}'.format(i + 1, self.vocab_size, j + 1, self.vocab_size))
                     sys.stdout.flush()
 
                     x_ij = self.cooccurrence_matrix[i][j]
@@ -106,7 +106,7 @@ class Glove:
                     d_b[i] += weight * inner
                     d_b_tilda[j] += weight * inner
 
-            print("Error iteration {}: {}".format(e+1, J))
+            print("\nError iteration {}: {}".format(e+1, J))
 
             W -= learning_rate * d_W
             W_tilda -= learning_rate * d_W_tilda
