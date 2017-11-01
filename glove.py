@@ -79,7 +79,6 @@ class Glove:
     def train(self, embedding_size, learning_rate, epochs, alpha, x_max):
         self.__check_fit()
         self.__check_cooc()
-        self.vocab_size = 100
         W = np.random.normal(0.0, 1e-3, (self.vocab_size, embedding_size))
         W_tilda = np.random.normal(0.0, 1e-3, (self.vocab_size, embedding_size))
         b = np.random.normal(0.0, 1e-3, (self.vocab_size))
