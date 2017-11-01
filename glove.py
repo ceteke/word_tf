@@ -104,7 +104,7 @@ class Glove:
                     d_b[i] += weight * inner
                     d_b_tilda[j] += weight * inner
 
-            print(J)
+            print("Error iteration {}: {}".format(e, J))
 
             W -= learning_rate * d_W
             W_tilda -= learning_rate * d_W_tilda
@@ -112,3 +112,11 @@ class Glove:
             b_tilda -= learning_rate * d_b_tilda
 
         self.embedding_matrix = W + W_tilda
+
+    def most_similar(self, word, n=15):
+        word_id = self.tok2id[word]
+
+        dists = np.dot(self.embedding_matrix, self.embedding_matrix[word_id])
+        top_ids = np.argsort(dists)[::-1][:n + 1]
+
+        return [self.id2tok[id] for id in top_ids if id != word_id][:n]

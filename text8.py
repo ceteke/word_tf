@@ -12,4 +12,4 @@ print("Fitting corpus...")
 glove.train(100, 0.05, 25, 0.75, 100)
 #print(glove.most_similar(['were', 'are'], ['was'], topn=50))
 
-
+print(glove.most_similar('frog'))
