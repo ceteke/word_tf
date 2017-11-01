@@ -93,6 +93,9 @@ class Glove:
 
             for i in range(self.vocab_size):
                 for j in range(self.vocab_size):
+                    sys.stdout.write("\r" + 'i:{}/{}, j:{}/{}\n'.format(i + 1, self.vocab_size, j + 1, self.vocab_size))
+                    sys.stdout.flush()
+
                     x_ij = self.cooccurrence_matrix[i][j]
                     inner = np.dot(W[i], W_tilda[j]) + b[i] + b_tilda[j] + np.log(x_ij + 1e-100)
                     weight = self.__f(x_ij, alpha, x_max)
@@ -103,7 +106,7 @@ class Glove:
                     d_b[i] += weight * inner
                     d_b_tilda[j] += weight * inner
 
-            print("Error iteration {}: {}".format(e, J))
+            print("Error iteration {}: {}".format(e+1, J))
 
             W -= learning_rate * d_W
             W_tilda -= learning_rate * d_W_tilda
