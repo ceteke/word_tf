@@ -99,10 +99,10 @@ class Glove:
                     weight = self.__f(x_ij, alpha, x_max)
                     J +=  weight * np.square(inner)
 
-                    d_W[i] = weight * W_tilda[j] * inner
-                    d_W_tilda[j] = weight * W[i] * inner
-                    d_b[i] = weight * inner
-                    d_b_tilda[j] = weight * inner
+                    d_W[i] += weight * W_tilda[j] * inner
+                    d_W_tilda[j] += weight * W[i] * inner
+                    d_b[i] += weight * inner
+                    d_b_tilda[j] += weight * inner
 
             print(J)
 
