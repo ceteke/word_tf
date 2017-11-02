@@ -31,7 +31,7 @@ class Glove:
             num_toks = len(sentence_idx)
             for idx, id in enumerate(sentence_idx):
                 if self.verbose == 1:
-                    sys.stdout.write("\r" + 'Sentence:{}/{}, Token:{}/{}\n'.format(s+1,num_sentence,idx+1,num_toks))
+                    sys.stdout.write("\r" + 'Sentence:{}/{}, Token:{}/{}'.format(s+1,num_sentence,idx+1,num_toks))
                     sys.stdout.flush()
                 context_start = max(0, idx-window_size)
                 context_end = min(len(sentence_idx)-1, idx+window_size)
