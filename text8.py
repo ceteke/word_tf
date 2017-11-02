@@ -4,12 +4,11 @@ import pickle
 with open('text8', 'r', encoding='utf-8') as f:
     corpus = f.readlines()
 
-#glove = pickle.load(open('glove.pkl', 'rb'))
-glove = Glove(verbose=1)
-print("Fitting corpus...")
-glove.fit_corpus(corpus, 10, 1000)
-glove.save()
-glove.train(50, 0.05, 25, 0.75, 100)
+glove = pickle.load(open('glove.pkl', 'rb'))
+#glove = Glove(verbose=1)
+#glove.fit_corpus(corpus, 10, 1000)
+#glove.save()
+print("Training")
+glove.train(embedding_size=50, learning_rate=0.001, epochs=25, alpha=0.75, x_max=100)
 #print(glove.most_similar(['were', 'are'], ['was'], topn=50))
-
-print(glove.most_similar('frog'))
+print(glove.most_similar('idea'))

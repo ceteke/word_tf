@@ -73,16 +73,24 @@ class Glove:
         self.vocab_size = vocab_size
 
     def __f(self, x_ij, alpha, x_max):
-        result = np.power(x_ij/x_max, alpha) if x_ij < x_max else 1.0
+        result = (x_ij/x_max)**alpha if x_ij < x_max else 1.0
         return result
 
     def train(self, embedding_size, learning_rate, epochs, alpha, x_max):
         self.__check_fit()
         self.__check_cooc()
-        W = np.random.normal(0.0, 1e-3, (self.vocab_size, embedding_size))
-        W_tilda = np.random.normal(0.0, 1e-3, (self.vocab_size, embedding_size))
-        b = np.random.normal(0.0, 1e-3, (self.vocab_size))
-        b_tilda = np.random.normal(0.0, 1e-3, (self.vocab_size))
+
+        W = np.random.uniform(-0.1, 0.1, (self.vocab_size, embedding_size))
+        grads_W = np.ones((self.vocab_size, embedding_size))
+
+        W_tilda = np.random.normal(-0.1, 0.1, (self.vocab_size, embedding_size))
+        grads_W_tilda = np.ones((self.vocab_size, embedding_size))
+
+        b = np.zeros((self.vocab_size))
+        grads_b = np.ones((self.vocab_size))
+
+        b_tilda = np.zeros((self.vocab_size))
+        grads_b_tilda = np.ones((self.vocab_size))
 
         for e in range(epochs):
             J = 0.0
@@ -93,11 +101,9 @@ class Glove:
 
             for i in range(self.vocab_size):
                 for j in range(self.vocab_size):
-                    sys.stdout.write("\r" + 'i:{}/{}, j:{}/{}'.format(i + 1, self.vocab_size, j + 1, self.vocab_size))
-                    sys.stdout.flush()
-
                     x_ij = self.cooccurrence_matrix[i][j]
-                    inner = np.dot(W[i], W_tilda[j]) + b[i] + b_tilda[j] + np.log(x_ij + 1e-100)
+                    inner = np.matmul(W[i].T, W_tilda[j]) + b[i] + b_tilda[j] - np.log(x_ij + 1e-100)
+
                     weight = self.__f(x_ij, alpha, x_max)
                     J +=  weight * np.square(inner)
 
@@ -106,12 +112,20 @@ class Glove:
                     d_b[i] += weight * inner
                     d_b_tilda[j] += weight * inner
 
+            J *= 0.5
+
             print("\nError iteration {}: {}".format(e+1, J))
 
-            W -= learning_rate * d_W
-            W_tilda -= learning_rate * d_W_tilda
-            b -= learning_rate * d_b
-            b_tilda -= learning_rate * d_b_tilda
+            W -= (learning_rate / np.sqrt(grads_W + 1e-100)) * d_W
+            W_tilda -= (learning_rate / np.sqrt(grads_W_tilda + 1e-100)) * d_W_tilda
+            b -= (learning_rate / np.sqrt(grads_b + 1e-100)) * d_b
+            b_tilda -= (learning_rate / np.sqrt(grads_b_tilda + 1e-100)) * d_b_tilda
+
+            grads_W += np.square(d_W)
+            grads_W_tilda += np.square(d_W_tilda)
+            grads_b += np.square(d_b)
+            grads_b_tilda += np.square(d_b_tilda)
+
 
         self.embedding_matrix = W + W_tilda
 
