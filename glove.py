@@ -83,15 +83,12 @@ class Glove:
         self.__check_cooc()
 
         W = np.random.uniform(-0.1, 0.1, (self.vocab_size, embedding_size))
-        grads_W = np.ones((self.vocab_size, embedding_size))
-
         W_tilda = np.random.normal(-0.1, 0.1, (self.vocab_size, embedding_size))
-        grads_W_tilda = np.ones((self.vocab_size, embedding_size))
 
         for e in range(epochs):
-            J = 0.0
-            d_W = np.zeros((self.vocab_size, embedding_size))
-            d_W_tilda = np.zeros((self.vocab_size, embedding_size))
+            J_total = 0.0
+            W_grads = np.ones((self.vocab_size, embedding_size))
+            W_tilda_grads = np.ones((self.vocab_size, embedding_size))
 
             for i in range(self.vocab_size):
                 for j in range(self.vocab_size):
@@ -99,21 +96,19 @@ class Glove:
                     inner = np.dot(W[i], W_tilda[j]) - np.log(x_ij + 1e-60)
 
                     weight = self.__f(x_ij, alpha, x_max)
-                    J +=  weight * np.square(inner)
+                    J = 0.5 * weight * np.square(inner)
+                    J_total += J
 
-                    d_W[i] += weight * W_tilda[j] * inner
-                    d_W_tilda[j] += weight * W[i] * inner
+                    d_W = weight * W_tilda[j] * inner
+                    d_W_tilda = weight * W[i] * inner
 
-            J *= 0.5
+                    W_grads[i] += np.square(d_W)
+                    W_tilda_grads[j] += np.square(d_W_tilda)
 
-            print("\nError iteration {}: {}".format(e+1, J))
+                    W[i] -= (learning_rate / np.sqrt(W_grads[i] + 1e-60)) * d_W
+                    W_tilda[j] -= (learning_rate / np.sqrt(W_tilda_grads[j] + 1e-60)) * d_W_tilda
 
-            W -= (learning_rate / np.sqrt(grads_W + 1e-60)) * d_W
-            W_tilda -= (learning_rate / np.sqrt(grads_W_tilda + 1e-60)) * d_W_tilda
-
-            grads_W += np.square(d_W)
-            grads_W_tilda += np.square(d_W_tilda)
-
+            print("Error iteration {}: {}".format(e+1, J_total/(self.vocab_size**2)))
 
         self.embedding_matrix = W + W_tilda
 
