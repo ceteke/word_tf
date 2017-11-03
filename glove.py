@@ -9,6 +9,7 @@ class Glove:
         self.verbose = verbose
         self.cooccurrence_matrix = None
         self.embedding_matrix = None
+        self.ignored_words = ['a', 'the', 'am', 'of', 'and', 'in', 'to', 'is', 's',]
 
     def __check_fit(self):
         assert len(self.id2tok) > 0 and len(self.tok2id) > 0, "Corpus is not fitted"
@@ -59,8 +60,9 @@ class Glove:
             sent_proc = sentence.lower().strip()
             tokens = self.tokenizer.tokenize(sent_proc)
             for token in tokens:
-                count = tok2count.get(token,0) + 1
-                tok2count[token] = count
+                if token not in self.ignored_words:
+                    count = tok2count.get(token,0) + 1
+                    tok2count[token] = count
 
         vocab_tokens = dict(sorted(tok2count.items(), key=operator.itemgetter(1), reverse=True)[:vocab_size]).keys()
         tok_idx = 0
@@ -86,45 +88,31 @@ class Glove:
         W_tilda = np.random.normal(-0.1, 0.1, (self.vocab_size, embedding_size))
         grads_W_tilda = np.ones((self.vocab_size, embedding_size))
 
-        b = np.zeros((self.vocab_size))
-        grads_b = np.ones((self.vocab_size))
-
-        b_tilda = np.zeros((self.vocab_size))
-        grads_b_tilda = np.ones((self.vocab_size))
-
         for e in range(epochs):
             J = 0.0
             d_W = np.zeros((self.vocab_size, embedding_size))
             d_W_tilda = np.zeros((self.vocab_size, embedding_size))
-            d_b = np.zeros((self.vocab_size))
-            d_b_tilda = np.zeros((self.vocab_size))
 
             for i in range(self.vocab_size):
                 for j in range(self.vocab_size):
                     x_ij = self.cooccurrence_matrix[i][j]
-                    inner = np.matmul(W[i].T, W_tilda[j]) + b[i] + b_tilda[j] - np.log(x_ij + 1e-100)
+                    inner = np.dot(W[i], W_tilda[j]) - np.log(x_ij + 1e-60)
 
                     weight = self.__f(x_ij, alpha, x_max)
                     J +=  weight * np.square(inner)
 
                     d_W[i] += weight * W_tilda[j] * inner
                     d_W_tilda[j] += weight * W[i] * inner
-                    d_b[i] += weight * inner
-                    d_b_tilda[j] += weight * inner
 
             J *= 0.5
 
             print("\nError iteration {}: {}".format(e+1, J))
 
-            W -= (learning_rate / np.sqrt(grads_W + 1e-100)) * d_W
-            W_tilda -= (learning_rate / np.sqrt(grads_W_tilda + 1e-100)) * d_W_tilda
-            b -= (learning_rate / np.sqrt(grads_b + 1e-100)) * d_b
-            b_tilda -= (learning_rate / np.sqrt(grads_b_tilda + 1e-100)) * d_b_tilda
+            W -= (learning_rate / np.sqrt(grads_W + 1e-60)) * d_W
+            W_tilda -= (learning_rate / np.sqrt(grads_W_tilda + 1e-60)) * d_W_tilda
 
             grads_W += np.square(d_W)
             grads_W_tilda += np.square(d_W_tilda)
-            grads_b += np.square(d_b)
-            grads_b_tilda += np.square(d_b_tilda)
 
 
         self.embedding_matrix = W + W_tilda
