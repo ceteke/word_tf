@@ -1,8 +1,6 @@
 import numpy as np
 import nltk, operator, sys, pickle, itertools, random
 import cudamat as cm
-import pymp
-pymp.config.nested = True
 
 class Glove:
     def __init__(self, verbose=0):
@@ -86,9 +84,9 @@ class Glove:
         self.__check_cooc()
 
         W = np.random.uniform(-0.1, 0.1, (self.vocab_size, embedding_size))
-        W_tilda = np.random.normal(-0.1, 0.1, (self.vocab_size, embedding_size))
-        b = np.zeros((self.vocab_size))
-        b_tilda = np.zeros((self.vocab_size))
+        W_tilda = np.random.uniform(-0.1, 0.1, (self.vocab_size, embedding_size))
+        b = np.random.uniform(-0.1, 0.1, (self.vocab_size, embedding_size))
+        b_tilda = np.random.uniform(-0.1, 0.1, (self.vocab_size, embedding_size))
 
         W_grads = np.ones((self.vocab_size, embedding_size))
         W_tilda_grads = np.ones((self.vocab_size, embedding_size))
@@ -98,49 +96,45 @@ class Glove:
         for e in range(epochs):
             J_total = 0.0
 
-            with pymp.Parallel(8) as p1:
-                for i in p1.range(0, self.vocab_size):
-                    for j in range(self.vocab_size):
-                        x_ij = self.cooccurrence_matrix[i][j]
+            for i in range(self.vocab_size):
+                for j in range(self.vocab_size):
+                    x_ij = self.cooccurrence_matrix[i][j]
 
-                        W_i = W[i]
-                        W_grad = W_grads[i]
-                        b_grad = b_grads[i]
+                    W_i = W[i]
+                    W_grad = W_grads[i]
+                    b_grad = b_grads[i]
 
-                        with p1.lock:
-                            W_t_j = W[j]
-                            W_tilda_grad = W_tilda_grads[j]
-                            b_tilda_grad = b_tilda_grads[j]
+                    W_t_j = W[j]
+                    W_tilda_grad = W_tilda_grads[j]
+                    b_tilda_grad = b_tilda_grads[j]
 
-                        inner = np.dot(W_i, W_t_j) - np.log(x_ij + 1e-60)
+                    inner = np.dot(W_i, W_t_j) - np.log(x_ij + 1e-60)
 
-                        weight = self.__f(x_ij, alpha, x_max)
-                        J = 0.5 * weight * np.square(inner)
+                    weight = self.__f(x_ij, alpha, x_max)
+                    J = 0.5 * weight * np.square(inner)
 
-                        J_total += J
+                    J_total += J
 
-                        common_term = weight * inner
-                        d_W = common_term * W_t_j
+                    common_term = weight * inner
+                    d_W = common_term * W_t_j
 
-                        d_W_tilda = common_term * W_i
-                        d_b = d_b_tilda = common_term
+                    d_W_tilda = common_term * W_i
+                    d_b = d_b_tilda = common_term
 
-                        W[i] -= (learning_rate / np.sqrt(W_grad + 1e-60)) * d_W
-                        b[i] -= (learning_rate / np.sqrt(b_grad + 1e-60)) * d_b
+                    W[i] -= (learning_rate / np.sqrt(W_grad + 1e-60)) * d_W
+                    b[i] -= (learning_rate / np.sqrt(b_grad + 1e-60)) * d_b
 
-                        W_t_update = (learning_rate / np.sqrt(W_tilda_grad + 1e-60)) * d_W_tilda
-                        b_t_update = (learning_rate / np.sqrt(b_tilda_grad + 1e-60)) * d_b_tilda
+                    W_t_update = (learning_rate / np.sqrt(W_tilda_grad + 1e-60)) * d_W_tilda
+                    b_t_update = (learning_rate / np.sqrt(b_tilda_grad + 1e-60)) * d_b_tilda
 
-                        with p1.lock:
-                            W_tilda[j] -= W_t_update
-                            b_tilda[j] -= b_t_update
+                    W_tilda[j] -= W_t_update
+                    b_tilda[j] -= b_t_update
 
-                        W_grads[i] += np.square(d_W)
-                        b_grads[i] += np.square(d_b)
+                    W_grads[i] += np.square(d_W)
+                    b_grads[i] += np.square(d_b)
 
-                        with p1.lock:
-                            W_tilda_grads[j] += np.square(d_W_tilda)
-                            b_tilda_grads[j] += np.square(d_b_tilda)
+                    W_tilda_grads[j] += np.square(d_W_tilda)
+                    b_tilda_grads[j] += np.square(d_b_tilda)
 
 
             print("Error iteration {}: {}".format(e+1, J_total/(self.vocab_size**2)))
