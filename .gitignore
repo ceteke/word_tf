@@ -1,6 +1,7 @@
-glove.pkl
 text8
 .idea
 __pycache__/
 text8.zip
 text8
+*.pkl
+movie_lines.txt

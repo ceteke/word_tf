@@ -8,7 +8,6 @@ class Glove:
         self.id2tok = {}
         self.tok2id = {}
         self.verbose = verbose
-        self.cooccurrence_matrix = None
         self.cooccurence_dict = {}
         self.embedding_matrix = None
         self.ignored_words = ['a', 'the', 'am', 'of', 'and', 'in', 'to', 'is', 's']
@@ -17,14 +16,13 @@ class Glove:
         assert len(self.id2tok) > 0 and len(self.tok2id) > 0, "Corpus is not fitted"
 
     def __check_cooc(self):
-        assert self.cooccurrence_matrix is not None, "Co-Occurrence Matrix is not formed"
+        assert len(self.cooccurence_dict) == 0, "Co-Occurrence Matrix is not formed"
 
     def __check_train(self):
         assert self.embedding_matrix is not None, "Training is not done"
 
     def __form_cooccurence(self, corpus, window_size, vocab_size):
         self.__check_fit()
-        cooccurrences = np.zeros((vocab_size, vocab_size), dtype=np.float32)
 
         num_sentence = len(corpus)
         for s, sentence in enumerate(corpus):
@@ -44,23 +42,23 @@ class Glove:
                 right_context = sentence_idx[idx+1:context_end+1]
 
                 for l_idx, l_id in enumerate(left_context):
-                    if l_id != -1 or l_id != id:
+                    if l_id != -1 and l_id != id:
                         num = 1 / (window_size-l_idx)
-                        cooccurrences[id][l_id] += num
                         dict_value = self.cooccurence_dict.get((id, l_id), 0.0)
                         self.cooccurence_dict[(id, l_id)] = dict_value + num
 
                 for r_idx, r_id in enumerate(right_context):
-                    if r_id != -1 or r_id != id:
+                    if r_id != -1 and r_id != id:
                         num = 1 / (r_idx+1)
-                        cooccurrences[id][r_id] += num
                         dict_value = self.cooccurence_dict.get((id, r_id), 0.0)
                         self.cooccurence_dict[(id, r_id)] = dict_value + num
 
-        return cooccurrences
+    def save(self, name):
+        pickle.dump(self, open('glove-{}.pkl'.format(name), 'wb'), protocol=4)
 
-    def save(self):
-        pickle.dump(self, open('glove.pkl', 'wb'), protocol=4)
+    def save_embedding(self, name):
+        assert self.embedding_matrix is not None, "Train first"
+        pickle.dump(self.embedding_matrix, open('glove-embedding-{}.pkl'.format(name), 'wb'), protocol=4)
 
     def fit_corpus(self, corpus, window_size, vocab_size):
         tok2count = {}
@@ -79,7 +77,7 @@ class Glove:
             self.id2tok[tok_idx] = vt
             tok_idx += 1
 
-        self.cooccurrence_matrix = self.__form_cooccurence(corpus, window_size, vocab_size)
+        self.__form_cooccurence(corpus, window_size, vocab_size)
         self.vocab_size = vocab_size
 
     def __f(self, x_ij, alpha, x_max):
@@ -105,7 +103,9 @@ class Glove:
 
             for i in range(self.vocab_size):
                 for j in range(self.vocab_size):
-                    x_ij = self.cooccurrence_matrix[i][j]
+                    if (i, j) not in self.cooccurence_dict:
+                        continue
+                    x_ij = self.cooccurence_dict[(i, j)]
 
                     W_i = W[i]
                     W_grad = W_grads[i]
@@ -177,8 +177,8 @@ class Glove:
         dot_product = tf.reduce_sum(tf.multiply(left_embedding, right_embedding), axis=1)
         log_X = tf.log(self.counts)
 
-        J = tf.square(tf.add_n([dot_product, left_bias, right_bias, -log_X])) * weighting_factor * 0.5
-        J = tf.reduce_mean(J)
+        J = tf.square(tf.add_n([dot_product, left_bias, right_bias, -log_X])) * weighting_factor
+        J = tf.reduce_sum(J) * 0.5
 
         train_op = self.optimizer.minimize(J, global_step=self.global_step)
         embedding_op = tf.add(self.W, self.W_tilda)
@@ -201,6 +201,9 @@ class Glove:
         i_idxs = data[0][0:limit]
         j_idxs = data[1][0:limit]
         counts = data[2][0:limit]
+
+        ind_list = list(range(limit))
+        random.shuffle(ind_list)
 
         for ndx in range(0, limit, batch_size):
             yield i_idxs[ndx:ndx + batch_size], j_idxs[ndx:ndx + batch_size], counts[ndx:ndx + batch_size]
