@@ -1,6 +1,6 @@
 import numpy as np
-import nltk, operator, sys, pickle, itertools, random
-import cudamat as cm
+import nltk, operator, sys, pickle
+import tensorflow as tf
 
 class Glove:
     def __init__(self, verbose=0):
@@ -141,69 +141,47 @@ class Glove:
 
         self.embedding_matrix = W + W_tilda
 
+    def __form_variables(self, embedding_size, batch_size, learning_rate):
+        self.left_words = tf.placeholder(tf.int32, shape=[batch_size])
+        self.right_words = tf.placeholder(tf.int32, shape=[batch_size])
+        self.counts = tf.placeholder(tf.float32, shape=[batch_size])
 
-    def train_cuda(self, embedding_size, learning_rate, epochs, alpha, x_max):
-        self.__check_fit()
-        self.__check_cooc()
+        self.W = tf.Variable(tf.truncated_normal([self.vocab_size, embedding_size], stddev=1e-3))
+        self.W_tilda = tf.Variable(tf.truncated_normal([self.vocab_size, embedding_size], stddev=1e-3))
+        self.b = tf.Variable(tf.truncated_normal([self.vocab_size], stddev=1e-3))
+        self.b_tilda = tf.Variable(tf.truncated_normal([self.vocab_size], stddev=1e-3))
 
-        cm.cublas_init()
+        self.optimizer = tf.train.AdagradOptimizer(learning_rate=learning_rate)
 
-        f = lambda x: 1.0 if x >= x_max else np.power(x/x_max, alpha)
-        f_vec = np.vectorize(f)
+    def __form_graph(self, embedding_size, batch_size, learning_rate, alpha, x_max):
+        self.__form_variables(embedding_size, batch_size, learning_rate)
 
-        self.cooccurrence_matrix = np.add(self.cooccurrence_matrix, 1e-5)
+        left_embedding = tf.nn.embedding_lookup(self.W, self.left_words)
+        right_embedding = tf.nn.embedding_lookup(self.W_tilda, self.right_words)
+        left_bias = tf.nn.embedding_lookup(self.b, self.left_words)
+        right_bias = tf.nn.embedding_lookup(self.b_tilda, self.left_words)
 
-        W = np.random.uniform(-0.1, 0.1, (self.vocab_size, embedding_size))
-        W_tilda = np.random.normal(-0.1, 0.1, (self.vocab_size, embedding_size))
-        W_grads = np.ones((self.vocab_size, embedding_size))
-        W_tilda_grads = np.ones((self.vocab_size, embedding_size))
-        lr = np.ones((self.vocab_size, embedding_size)) * learning_rate
+        weighting_factor = tf.minimum(1.0, tf.pow(tf.div(self.counts,
+                                                         tf.constant(x_max, dtype=tf.float32)),
+                                                  tf.constant(alpha, dtype=tf.float32)))
 
-        W = cm.CUDAMatrix(W)
-        W_grads = cm.CUDAMatrix(W_grads)
-        W_tilda = cm.CUDAMatrix(W_tilda)
-        W_tilda_grads = cm.CUDAMatrix(W_tilda_grads)
-        log_X = cm.CUDAMatrix(np.log(self.cooccurrence_matrix))
-        f_X = cm.CUDAMatrix(f_vec(self.cooccurrence_matrix))
-        lr = cm.CUDAMatrix(lr)
+        dot_product = tf.reduce_sum(tf.multiply(left_embedding, right_embedding), axis=1)
+        log_X = tf.log(self.counts)
 
-        for e in range(epochs):
-            common = cm.empty((self.vocab_size, self.vocab_size))
-            cm.dot(W, W_tilda.transpose()).subtract(log_X, target=common)
+        J = tf.square(tf.add_n([dot_product, left_bias, right_bias, -log_X])) * weighting_factor * 0.5
+        J = tf.reduce_mean(J)
 
-            J = cm.empty((self.vocab_size, self.vocab_size))
-            cm.pow(common, 2, target=J)
-            J.mult(f_X)
+        train_op = self.optimizer.minimize(J)
+        embedding_op = tf.add(self.W, self.W_tilda)
 
-            d_common = cm.empty((self.vocab_size, self.vocab_size))
-            common.mult(f_X, target=d_common)
+        return J, train_op, embedding_op
 
-            d_W = cm.dot(d_common, W_tilda)
-            d_W_tilda = cm.dot(d_common, W)
 
-            d_W_lr = cm.empty((self.vocab_size, embedding_size))
-            cm.sqrt(W_grads, target=d_W_lr)
-            d_W_t_lr = cm.empty((self.vocab_size, embedding_size))
-            cm.sqrt(W_tilda_grads, target=d_W_t_lr)
+    def train_tf(self, sess, embedding_size, learning_rate, epochs, alpha, x_max, batch_size=512, info_step=1000):
+        loss_op, train_op, embedding_op = self.__form_graph(embedding_size, batch_size, learning_rate, alpha, x_max)
+        sess.run(tf.global_variables_initializer())
 
-            lr.divide(d_W_lr, target=d_W_lr)
-            d_W_lr.mult(d_W)
-            d_W_lr.div_by_scalar(self.vocab_size)
-
-            lr.divide(d_W_t_lr, target=d_W_t_lr)
-            d_W_t_lr.mult(d_W_tilda)
-            d_W_t_lr.div_by_scalar(self.vocab_size)
-
-            W.subtract(d_W_lr)
-            W_tilda.subtract(d_W_t_lr)
-
-            W_grads.add(cm.pow(d_W, 2))
-            W_tilda_grads.add(cm.pow(d_W_tilda, 2))
-
-            J_avg = np.sum(J.asarray()*0.5/(self.vocab_size*self.vocab_size))
-            print(J_avg)
-
-        self.embedding_matrix = W.asarray() + W_tilda.asarray()
+        self.embedding_matrix = embedding_op.eval(session=sess)
 
     def most_similar(self, word, n=15):
         word_id = self.tok2id[word]
