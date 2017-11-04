@@ -1,5 +1,6 @@
 import nltk, operator, sys, pickle, random
 import tensorflow as tf
+from sklearn.utils import shuffle
 
 class SkipGram:
     def __init__(self, verbose=0):
@@ -90,9 +91,7 @@ class SkipGram:
         X_b = self.X[0:limit]
         y_b = self.y[0:limit]
 
-        ind_list = list(range(limit))
-        random.shuffle(ind_list)
-
+        X_b, y_b = shuffle(X_b, y_b)
         for ndx in range(0, limit, batch_size):
             yield X_b[ndx:ndx + batch_size], y_b[ndx:ndx + batch_size]
 

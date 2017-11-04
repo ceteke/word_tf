@@ -1,6 +1,7 @@
 import numpy as np
 import nltk, operator, sys, pickle, random
 import tensorflow as tf
+from sklearn.utils import shuffle
 
 class Glove:
     def __init__(self, verbose=0):
@@ -202,8 +203,7 @@ class Glove:
         j_idxs = data[1][0:limit]
         counts = data[2][0:limit]
 
-        ind_list = list(range(limit))
-        random.shuffle(ind_list)
+        i_idxs, j_idxs, counts = shuffle(i_idxs, j_idxs, counts)
 
         for ndx in range(0, limit, batch_size):
             yield i_idxs[ndx:ndx + batch_size], j_idxs[ndx:ndx + batch_size], counts[ndx:ndx + batch_size]
