@@ -1,5 +1,5 @@
 import numpy as np
-import nltk, operator, sys, pickle
+import nltk, operator, sys, pickle, random
 import tensorflow as tf
 
 class Glove:
@@ -9,8 +9,9 @@ class Glove:
         self.tok2id = {}
         self.verbose = verbose
         self.cooccurrence_matrix = None
+        self.cooccurence_dict = {}
         self.embedding_matrix = None
-        self.ignored_words = ['a', 'the', 'am', 'of', 'and', 'in', 'to', 'is', 's', 'that', 'there', 'not', 'it']
+        self.ignored_words = ['a', 'the', 'am', 'of', 'and', 'in', 'to', 'is', 's']
 
     def __check_fit(self):
         assert len(self.id2tok) > 0 and len(self.tok2id) > 0, "Corpus is not fitted"
@@ -32,6 +33,8 @@ class Glove:
             sentence_idx = [self.tok2id[t] if t in self.tok2id else -1 for t in tokens]
             num_toks = len(sentence_idx)
             for idx, id in enumerate(sentence_idx):
+                if id == -1:
+                    continue
                 if self.verbose == 1:
                     sys.stdout.write("\r" + 'Sentence:{}/{}, Token:{}/{}'.format(s+1,num_sentence,idx+1,num_toks))
                     sys.stdout.flush()
@@ -41,14 +44,18 @@ class Glove:
                 right_context = sentence_idx[idx+1:context_end+1]
 
                 for l_idx, l_id in enumerate(left_context):
-                    if id != -1:
+                    if l_id != -1 or l_id != id:
                         num = 1 / (window_size-l_idx)
                         cooccurrences[id][l_id] += num
+                        dict_value = self.cooccurence_dict.get((id, l_id), 0.0)
+                        self.cooccurence_dict[(id, l_id)] = dict_value + num
 
                 for r_idx, r_id in enumerate(right_context):
-                    if id != -1:
+                    if r_id != -1 or r_id != id:
                         num = 1 / (r_idx+1)
                         cooccurrences[id][r_id] += num
+                        dict_value = self.cooccurence_dict.get((id, r_id), 0.0)
+                        self.cooccurence_dict[(id, r_id)] = dict_value + num
 
         return cooccurrences
 
@@ -151,6 +158,8 @@ class Glove:
         self.b = tf.Variable(tf.truncated_normal([self.vocab_size], stddev=1e-3))
         self.b_tilda = tf.Variable(tf.truncated_normal([self.vocab_size], stddev=1e-3))
 
+        self.global_step = tf.Variable(0, dtype=tf.int32, trainable=False)
+
         self.optimizer = tf.train.AdagradOptimizer(learning_rate=learning_rate)
 
     def __form_graph(self, embedding_size, batch_size, learning_rate, alpha, x_max):
@@ -171,15 +180,51 @@ class Glove:
         J = tf.square(tf.add_n([dot_product, left_bias, right_bias, -log_X])) * weighting_factor * 0.5
         J = tf.reduce_mean(J)
 
-        train_op = self.optimizer.minimize(J)
+        train_op = self.optimizer.minimize(J, global_step=self.global_step)
         embedding_op = tf.add(self.W, self.W_tilda)
 
         return J, train_op, embedding_op
 
+    def __prepare_data(self):
+        data = list(self.cooccurence_dict.items())
+        i_idxs = []
+        j_idxs = []
+        counts = []
+        for idx, count in data:
+            i_idxs.append(idx[0])
+            j_idxs.append(idx[1])
+            counts.append(count)
+        return i_idxs, j_idxs, counts
+
+    def __get_batches(self, data, batch_size):
+        limit = (len(data[0])//batch_size)*batch_size
+        i_idxs = data[0][0:limit]
+        j_idxs = data[1][0:limit]
+        counts = data[2][0:limit]
+
+        for ndx in range(0, limit, batch_size):
+            yield i_idxs[ndx:ndx + batch_size], j_idxs[ndx:ndx + batch_size], counts[ndx:ndx + batch_size]
 
     def train_tf(self, sess, embedding_size, learning_rate, epochs, alpha, x_max, batch_size=512, info_step=1000):
         loss_op, train_op, embedding_op = self.__form_graph(embedding_size, batch_size, learning_rate, alpha, x_max)
         sess.run(tf.global_variables_initializer())
+
+        info_loss = 0.0
+        data = self.__prepare_data()
+        for e in range(epochs):
+            print("Epoch {}/{}".format(e+1, epochs))
+            batch_generator = enumerate(self.__get_batches(data, batch_size))
+            epoch_loss = 0.0
+            for i, b in batch_generator:
+                loss, _ = sess.run([loss_op, train_op], feed_dict={self.left_words:b[0], self.right_words:b[1], self.counts:b[2]})
+                info_loss += loss
+                epoch_loss += loss
+
+                if (i+1) % info_step == 0:
+                    print('\tBatch {} loss: {}'.format(i+1, info_loss/info_step))
+                    info_loss = 0.0
+
+            print('\tAverage loss: {}'.format(epoch_loss/(len(self.cooccurence_dict) / batch_size)))
 
         self.embedding_matrix = embedding_op.eval(session=sess)
 
