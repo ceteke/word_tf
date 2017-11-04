@@ -1,5 +1,8 @@
 import numpy as np
-import nltk, operator, sys, pickle
+import nltk, operator, sys, pickle, itertools, random
+import cudamat as cm
+import pymp
+pymp.config.nested = True
 
 class Glove:
     def __init__(self, verbose=0):
@@ -9,7 +12,7 @@ class Glove:
         self.verbose = verbose
         self.cooccurrence_matrix = None
         self.embedding_matrix = None
-        self.ignored_words = ['a', 'the', 'am', 'of', 'and', 'in', 'to', 'is', 's',]
+        self.ignored_words = ['a', 'the', 'am', 'of', 'and', 'in', 'to', 'is', 's', 'that', 'there', 'not', 'it']
 
     def __check_fit(self):
         assert len(self.id2tok) > 0 and len(self.tok2id) > 0, "Corpus is not fitted"
@@ -78,39 +81,135 @@ class Glove:
         result = (x_ij/x_max)**alpha if x_ij < x_max else 1.0
         return result
 
-    def train(self, embedding_size, learning_rate, epochs, alpha, x_max):
+    def train_iterative(self, embedding_size, learning_rate, epochs, alpha, x_max):
         self.__check_fit()
         self.__check_cooc()
 
         W = np.random.uniform(-0.1, 0.1, (self.vocab_size, embedding_size))
         W_tilda = np.random.normal(-0.1, 0.1, (self.vocab_size, embedding_size))
+        b = np.zeros((self.vocab_size))
+        b_tilda = np.zeros((self.vocab_size))
+
+        W_grads = np.ones((self.vocab_size, embedding_size))
+        W_tilda_grads = np.ones((self.vocab_size, embedding_size))
+        b_grads = np.ones((self.vocab_size))
+        b_tilda_grads = np.ones((self.vocab_size))
 
         for e in range(epochs):
             J_total = 0.0
-            W_grads = np.ones((self.vocab_size, embedding_size))
-            W_tilda_grads = np.ones((self.vocab_size, embedding_size))
 
-            for i in range(self.vocab_size):
-                for j in range(self.vocab_size):
-                    x_ij = self.cooccurrence_matrix[i][j]
-                    inner = np.dot(W[i], W_tilda[j]) - np.log(x_ij + 1e-60)
+            with pymp.Parallel(8) as p1:
+                for i in p1.range(0, self.vocab_size):
+                    for j in range(self.vocab_size):
+                        x_ij = self.cooccurrence_matrix[i][j]
 
-                    weight = self.__f(x_ij, alpha, x_max)
-                    J = 0.5 * weight * np.square(inner)
-                    J_total += J
+                        W_i = W[i]
+                        W_grad = W_grads[i]
+                        b_grad = b_grads[i]
 
-                    d_W = weight * W_tilda[j] * inner
-                    d_W_tilda = weight * W[i] * inner
+                        with p1.lock:
+                            W_t_j = W[j]
+                            W_tilda_grad = W_tilda_grads[j]
+                            b_tilda_grad = b_tilda_grads[j]
 
-                    W_grads[i] += np.square(d_W)
-                    W_tilda_grads[j] += np.square(d_W_tilda)
+                        inner = np.dot(W_i, W_t_j) - np.log(x_ij + 1e-60)
 
-                    W[i] -= (learning_rate / np.sqrt(W_grads[i] + 1e-60)) * d_W
-                    W_tilda[j] -= (learning_rate / np.sqrt(W_tilda_grads[j] + 1e-60)) * d_W_tilda
+                        weight = self.__f(x_ij, alpha, x_max)
+                        J = 0.5 * weight * np.square(inner)
+
+                        J_total += J
+
+                        common_term = weight * inner
+                        d_W = common_term * W_t_j
+
+                        d_W_tilda = common_term * W_i
+                        d_b = d_b_tilda = common_term
+
+                        W[i] -= (learning_rate / np.sqrt(W_grad + 1e-60)) * d_W
+                        b[i] -= (learning_rate / np.sqrt(b_grad + 1e-60)) * d_b
+
+                        W_t_update = (learning_rate / np.sqrt(W_tilda_grad + 1e-60)) * d_W_tilda
+                        b_t_update = (learning_rate / np.sqrt(b_tilda_grad + 1e-60)) * d_b_tilda
+
+                        with p1.lock:
+                            W_tilda[j] -= W_t_update
+                            b_tilda[j] -= b_t_update
+
+                        W_grads[i] += np.square(d_W)
+                        b_grads[i] += np.square(d_b)
+
+                        with p1.lock:
+                            W_tilda_grads[j] += np.square(d_W_tilda)
+                            b_tilda_grads[j] += np.square(d_b_tilda)
+
 
             print("Error iteration {}: {}".format(e+1, J_total/(self.vocab_size**2)))
 
         self.embedding_matrix = W + W_tilda
+
+
+    def train_cuda(self, embedding_size, learning_rate, epochs, alpha, x_max):
+        self.__check_fit()
+        self.__check_cooc()
+
+        cm.cublas_init()
+
+        f = lambda x: 1.0 if x >= x_max else np.power(x/x_max, alpha)
+        f_vec = np.vectorize(f)
+
+        self.cooccurrence_matrix = np.add(self.cooccurrence_matrix, 1e-5)
+
+        W = np.random.uniform(-0.1, 0.1, (self.vocab_size, embedding_size))
+        W_tilda = np.random.normal(-0.1, 0.1, (self.vocab_size, embedding_size))
+        W_grads = np.ones((self.vocab_size, embedding_size))
+        W_tilda_grads = np.ones((self.vocab_size, embedding_size))
+        lr = np.ones((self.vocab_size, embedding_size)) * learning_rate
+
+        W = cm.CUDAMatrix(W)
+        W_grads = cm.CUDAMatrix(W_grads)
+        W_tilda = cm.CUDAMatrix(W_tilda)
+        W_tilda_grads = cm.CUDAMatrix(W_tilda_grads)
+        log_X = cm.CUDAMatrix(np.log(self.cooccurrence_matrix))
+        f_X = cm.CUDAMatrix(f_vec(self.cooccurrence_matrix))
+        lr = cm.CUDAMatrix(lr)
+
+        for e in range(epochs):
+            common = cm.empty((self.vocab_size, self.vocab_size))
+            cm.dot(W, W_tilda.transpose()).subtract(log_X, target=common)
+
+            J = cm.empty((self.vocab_size, self.vocab_size))
+            cm.pow(common, 2, target=J)
+            J.mult(f_X)
+
+            d_common = cm.empty((self.vocab_size, self.vocab_size))
+            common.mult(f_X, target=d_common)
+
+            d_W = cm.dot(d_common, W_tilda)
+            d_W_tilda = cm.dot(d_common, W)
+
+            d_W_lr = cm.empty((self.vocab_size, embedding_size))
+            cm.sqrt(W_grads, target=d_W_lr)
+            d_W_t_lr = cm.empty((self.vocab_size, embedding_size))
+            cm.sqrt(W_tilda_grads, target=d_W_t_lr)
+
+            lr.divide(d_W_lr, target=d_W_lr)
+            d_W_lr.mult(d_W)
+            d_W_lr.div_by_scalar(self.vocab_size)
+
+            lr.divide(d_W_t_lr, target=d_W_t_lr)
+            d_W_t_lr.mult(d_W_tilda)
+            d_W_t_lr.div_by_scalar(self.vocab_size)
+
+            W.subtract(d_W_lr)
+            W_tilda.subtract(d_W_t_lr)
+
+            W_grads.add(cm.pow(d_W, 2))
+            W_tilda_grads.add(cm.pow(d_W_tilda, 2))
+
+            J_avg = np.sum(J.asarray()*0.5/(self.vocab_size*self.vocab_size))
+            print(J_avg)
+
+        self.embedding_matrix = W.asarray() + W_tilda.asarray()
 
     def most_similar(self, word, n=15):
         word_id = self.tok2id[word]
