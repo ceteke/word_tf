@@ -213,7 +213,10 @@ class Glove:
         sess.run(tf.global_variables_initializer())
 
         info_loss = 0.0
+        print("Forming training data")
         data = self.__prepare_data()
+        self.cooccurence_dict = {} # Free some memory
+        print("Started training")
         for e in range(epochs):
             print("Epoch {}/{}".format(e+1, epochs))
             batch_generator = enumerate(self.__get_batches(data, batch_size))
